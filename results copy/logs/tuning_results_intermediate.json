@@ -1,0 +1,122 @@
+[
+    {
+        "run_id": 1,
+        "timestamp": "20250505_130157",
+        "mAP50": 0.592878957373089,
+        "hyperparameters": {
+            "epochs": 5,
+            "mosaic": 0.3,
+            "optimizer": "SGD",
+            "momentum": 0.5,
+            "lr0": 0.001,
+            "lrf": 0.0001,
+            "single_cls": false
+        },
+        "metrics": {}
+    },
+    {
+        "run_id": 2,
+        "timestamp": "20250505_132336",
+        "mAP50": 0.9321123599407267,
+        "hyperparameters": {
+            "epochs": 15,
+            "mosaic": 0.0,
+            "optimizer": "Adam",
+            "momentum": 0.5,
+            "lr0": 0.001,
+            "lrf": 0.0001,
+            "single_cls": false
+        },
+        "metrics": {}
+    },
+    {
+        "run_id": 3,
+        "timestamp": "20250505_142209",
+        "mAP50": 0.9303335620779417,
+        "hyperparameters": {
+            "epochs": 10,
+            "mosaic": 0.1,
+            "optimizer": "Adam",
+            "momentum": 0.5,
+            "lr0": 0.001,
+            "lrf": 0.001,
+            "single_cls": false
+        },
+        "metrics": {}
+    },
+    {
+        "run_id": 4,
+        "timestamp": "20250505_150615",
+        "mAP50": 0.9344447596791787,
+        "hyperparameters": {
+            "epochs": 10,
+            "mosaic": 0.5,
+            "optimizer": "AdamW",
+            "momentum": 0.2,
+            "lr0": 0.0001,
+            "lrf": 0.0001,
+            "single_cls": false
+        },
+        "metrics": {}
+    },
+    {
+        "run_id": 5,
+        "timestamp": "20250505_154359",
+        "mAP50": 0.9114877348493268,
+        "hyperparameters": {
+            "epochs": 10,
+            "mosaic": 0.5,
+            "optimizer": "SGD",
+            "momentum": 0.9,
+            "lr0": 0.01,
+            "lrf": 0.001,
+            "single_cls": false
+        },
+        "metrics": {}
+    },
+    {
+        "run_id": 6,
+        "timestamp": "20250505_161316",
+        "mAP50": 0.9311319806506906,
+        "hyperparameters": {
+            "epochs": 10,
+            "mosaic": 0.1,
+            "optimizer": "AdamW",
+            "momentum": 0.2,
+            "lr0": 0.0001,
+            "lrf": 1e-05,
+            "single_cls": false
+        },
+        "metrics": {}
+    },
+    {
+        "run_id": 7,
+        "timestamp": "20250505_171510",
+        "mAP50": 0.9114877348493268,
+        "hyperparameters": {
+            "epochs": 10,
+            "mosaic": 0.1,
+            "optimizer": "SGD",
+            "momentum": 0.9,
+            "lr0": 0.01,
+            "lrf": 0.001,
+            "single_cls": false
+        },
+        "metrics": {}
+    },
+    {
+        "run_id": 8,
+        "timestamp": "20250505_175439",
+        "mAP50": 0.6466671016985549,
+        "hyperparameters": {
+            "epochs": 5,
+            "mosaic": 0.5,
+            "optimizer": "Adam",
+            "momentum": 0.9,
+            "lr0": 0.01,
+            "lrf": 0.0001,
+            "single_cls": false
+        },
+        "metrics": {}
+    }
+]

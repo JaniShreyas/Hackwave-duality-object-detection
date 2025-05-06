@@ -1,17 +1,26 @@
 import argparse
-from ultralytics import YOLO
 import os
 import sys
 import datetime
 import json
+import itertools
+import random
+from ultralytics import YOLO
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from pathlib import Path
 
-EPOCHS = 1
-MOSAIC = 0.1
-OPTIMIZER = 'AdamW'
-MOMENTUM = 0.2
-LR0 = 0.001
-LRF = 0.0001
-SINGLE_CLS = False
+# Default hyperparameter ranges for tuning
+HP_RANGES = {
+    'epochs': [5, 10, 15],
+    'mosaic': [0.0, 0.1, 0.3, 0.5],
+    'optimizer': ['AdamW', 'SGD', 'Adam'],
+    'momentum': [0.2, 0.5, 0.9],
+    'lr0': [0.001, 0.01, 0.0001],
+    'lrf': [0.0001, 0.001, 0.00001],
+    'single_cls': [False]
+}
 
 def create_directory_if_not_exists(directory):
     """Create directory if it doesn't exist."""
@@ -19,49 +28,24 @@ def create_directory_if_not_exists(directory):
         os.makedirs(directory)
         print(f"Created directory: {directory}")
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    # epochs
-    parser.add_argument('--epochs', type=int, default=EPOCHS, help='Number of epochs')
-    # mosaic
-    parser.add_argument('--mosaic', type=float, default=MOSAIC, help='Mosaic augmentation')
-    # optimizer
-    parser.add_argument('--optimizer', type=str, default=OPTIMIZER, help='Optimizer')
-    # momentum
-    parser.add_argument('--momentum', type=float, default=MOMENTUM, help='Momentum')
-    # lr0
-    parser.add_argument('--lr0', type=float, default=LR0, help='Initial learning rate')
-    # lrf
-    parser.add_argument('--lrf', type=float, default=LRF, help='Final learning rate')
-    # single_cls
-    parser.add_argument('--single_cls', type=bool, default=SINGLE_CLS, help='Single class training')
-    args = parser.parse_args()
-    
-    this_dir = os.path.dirname(__file__)
-    os.chdir(this_dir)
-    
-    # Create directories for logs and weights
-    logs_dir = os.path.join(this_dir, "results", "logs")
-    weights_dir = os.path.join(this_dir, "results", "weights")
-    create_directory_if_not_exists(logs_dir)
-    create_directory_if_not_exists(weights_dir)
-    
+def run_training(hyperparams, this_dir, run_id):
+    """Run a single training with given hyperparameters."""
     # Get current timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
     model = YOLO(os.path.join(this_dir, "yolov8s.pt"))
     results = model.train(
         data=os.path.join(this_dir, "yolo_params.yaml"),
-        epochs=args.epochs,
+        epochs=hyperparams['epochs'],
         device=0,
-        single_cls=args.single_cls,
-        mosaic=args.mosaic,
-        optimizer=args.optimizer,
-        lr0=args.lr0,
-        lrf=args.lrf,
-        momentum=args.momentum,
-        project=os.path.join(this_dir, "results"),  # Set project directory to results
-        name="train"  # This creates a subdirectory under project
+        single_cls=hyperparams['single_cls'],
+        mosaic=hyperparams['mosaic'],
+        optimizer=hyperparams['optimizer'],
+        lr0=hyperparams['lr0'],
+        lrf=hyperparams['lrf'],
+        momentum=hyperparams['momentum'],
+        project=os.path.join(this_dir, "results"),
+        name=f"tuning_run_{run_id}"
     )
     
     # Get mAP50 from training results
@@ -70,76 +54,243 @@ if __name__ == '__main__':
     else:
         # Try to get mAP50 from the last epoch's results
         try:
-            # Format mAP50 to have 4 decimal places
             map50 = round(results.metrics.get('map50', 0), 4)
         except (AttributeError, KeyError):
-            # If unable to get mAP50, use a placeholder
             map50 = "unknown"
     
-    # Create filenames with timestamp and mAP50
-    base_filename = f"{timestamp}_mAP50_{map50}"
+    if isinstance(map50, str):
+        try:
+            map50 = float(map50)
+        except ValueError:
+            map50 = 0.0
     
-    # Save logs (metrics and hyperparameters)
-    logs_filename = os.path.join(logs_dir, f"{base_filename}_logs.json")
-    logs_data = {
+    # Create a results dictionary
+    result_data = {
+        "run_id": run_id,
         "timestamp": timestamp,
-        "metrics": results.metrics if hasattr(results, 'metrics') else {},
-        "hyperparameters": {
-            "epochs": args.epochs,
-            "mosaic": args.mosaic,
-            "optimizer": args.optimizer,
-            "momentum": args.momentum,
-            "lr0": args.lr0,
-            "lrf": args.lrf,
-            "single_cls": args.single_cls
-        }
+        "mAP50": map50,
+        "hyperparameters": hyperparams,
+        "metrics": results.metrics if hasattr(results, 'metrics') else {}
     }
     
-    with open(logs_filename, 'w') as f:
-        json.dump(logs_data, f, indent=4)
-    print(f"Training logs saved to: {logs_filename}")
+    return result_data
+
+def grid_search(param_ranges, max_combinations=None):
+    """Generate all combinations of hyperparameters or a random subset."""
+    keys = list(param_ranges.keys())
+    values = list(param_ranges.values())
     
-    # Save trained weights
-    # The model is already saved by YOLO in results/train/weights/
-    # We'll copy/rename the best model to our weights directory
-    best_model_path = os.path.join(this_dir, "results", "train", "weights", "best.pt")
+    all_combinations = list(itertools.product(*values))
+    total_combinations = len(all_combinations)
+    
+    if max_combinations and max_combinations < total_combinations:
+        print(f"Total possible combinations: {total_combinations}, selecting {max_combinations} random samples")
+        selected_combinations = random.sample(all_combinations, max_combinations)
+    else:
+        print(f"Total combinations: {total_combinations}")
+        selected_combinations = all_combinations
+    
+    # Convert combinations to dictionaries
+    param_dicts = []
+    for combo in selected_combinations:
+        param_dict = {keys[i]: combo[i] for i in range(len(keys))}
+        param_dicts.append(param_dict)
+    
+    return param_dicts
+
+def plot_results(results_df, output_dir):
+    """Create visualizations of hyperparameter tuning results."""
+    # Create output directory for plots
+    plots_dir = os.path.join(output_dir, "plots")
+    create_directory_if_not_exists(plots_dir)
+    
+    # Plot mAP50 for each run
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(results_df)), results_df['mAP50'], color='skyblue')
+    plt.xlabel('Run ID')
+    plt.ylabel('mAP50')
+    plt.title('mAP50 Across Hyperparameter Tuning Runs')
+    plt.xticks(range(len(results_df)), results_df['run_id'], rotation=90)
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, 'map50_by_run.png'))
+    
+    # Plot impact of key hyperparameters on mAP50
+    numeric_params = ['epochs', 'mosaic', 'momentum', 'lr0', 'lrf']
+    
+    # Create subplots for each numeric parameter
+    fig, axes = plt.subplots(len(numeric_params), 1, figsize=(10, 4*len(numeric_params)))
+    
+    for i, param in enumerate(numeric_params):
+        if param in results_df.columns:
+            axes[i].scatter(results_df[param], results_df['mAP50'])
+            axes[i].set_xlabel(param)
+            axes[i].set_ylabel('mAP50')
+            axes[i].set_title(f'Impact of {param} on mAP50')
+            
+            # Try to fit a trend line if we have numerical data
+            try:
+                z = np.polyfit(results_df[param], results_df['mAP50'], 1)
+                p = np.poly1d(z)
+                x_range = np.linspace(min(results_df[param]), max(results_df[param]), 100)
+                axes[i].plot(x_range, p(x_range), "r--")
+            except Exception as e:
+                print(f"Could not fit trend line for {param}: {e}")
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, 'hyperparameter_impact.png'))
+    
+    # For categorical parameters (like optimizer), create bar plots
+    for param in results_df.columns:
+        if param not in numeric_params and param != 'run_id' and param != 'mAP50':
+            plt.figure(figsize=(10, 6))
+            grouped = results_df.groupby(param)['mAP50'].mean().reset_index()
+            plt.bar(grouped[param], grouped['mAP50'], color='skyblue')
+            plt.xlabel(param)
+            plt.ylabel('Average mAP50')
+            plt.title(f'Impact of {param} on mAP50')
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, f'{param}_impact.png'))
+    
+    plt.close('all')
+
+def save_best_model(results_df, this_dir, output_dir):
+    """Save the best model based on mAP50."""
+    best_run = results_df.loc[results_df['mAP50'].idxmax()]
+    best_run_id = best_run['run_id']
+    best_map50 = best_run['mAP50']
+    
+    # Format timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create base filename
+    base_filename = f"{timestamp}_mAP50_{best_map50:.4f}_best_from_tuning"
+    
+    # Path to best model from the tuning run
+    best_model_path = os.path.join(this_dir, "results", f"tuning_run_{best_run_id}", "weights", "best.pt")
+    
     if os.path.exists(best_model_path):
         import shutil
-        weights_filename = os.path.join(weights_dir, f"{base_filename}_best.pt")
+        weights_filename = os.path.join(output_dir, "weights", f"{base_filename}_best.pt")
         shutil.copy(best_model_path, weights_filename)
-        print(f"Trained weights saved to: {weights_filename}")
+        print(f"Best model weights saved to: {weights_filename}")
+        
+        # Save best hyperparameters to a separate file
+        best_hp_file = os.path.join(output_dir, "logs", f"{base_filename}_best_hyperparams.json")
+        with open(best_hp_file, 'w') as f:
+            json.dump({
+                "best_run_id": best_run_id,
+                "mAP50": float(best_map50),
+                "hyperparameters": {
+                    key: (value if key != 'single_cls' else bool(value))
+                    for key, value in best_run.items() 
+                    if key in HP_RANGES.keys()
+                }
+            }, f, indent=4)
+        print(f"Best hyperparameters saved to: {best_hp_file}")
     else:
-        print("Warning: Best model weights not found!")
-'''
-Mixup boost val pred but reduces test pred
-Mosaic shouldn't be 1.0  
-'''
+        print(f"Warning: Could not find best model for run {best_run_id} at {best_model_path}")
 
-
-'''
-                   from  n    params  module                                       arguments
-  0                  -1  1       464  ultralytics.nn.modules.conv.Conv             [3, 16, 3, 2]
-  1                  -1  1      4672  ultralytics.nn.modules.conv.Conv             [16, 32, 3, 2]
-  2                  -1  1      7360  ultralytics.nn.modules.block.C2f             [32, 32, 1, True]
-  3                  -1  1     18560  ultralytics.nn.modules.conv.Conv             [32, 64, 3, 2]
-  4                  -1  2     49664  ultralytics.nn.modules.block.C2f             [64, 64, 2, True]
-  5                  -1  1     73984  ultralytics.nn.modules.conv.Conv             [64, 128, 3, 2]
-  6                  -1  2    197632  ultralytics.nn.modules.block.C2f             [128, 128, 2, True]
-  7                  -1  1    295424  ultralytics.nn.modules.conv.Conv             [128, 256, 3, 2]
-  8                  -1  1    460288  ultralytics.nn.modules.block.C2f             [256, 256, 1, True]
-  9                  -1  1    164608  ultralytics.nn.modules.block.SPPF            [256, 256, 5]
- 10                  -1  1         0  torch.nn.modules.upsampling.Upsample         [None, 2, 'nearest']
- 11             [-1, 6]  1         0  ultralytics.nn.modules.conv.Concat           [1]
- 12                  -1  1    148224  ultralytics.nn.modules.block.C2f             [384, 128, 1]
- 13                  -1  1         0  torch.nn.modules.upsampling.Upsample         [None, 2, 'nearest']
- 14             [-1, 4]  1         0  ultralytics.nn.modules.conv.Concat           [1]
- 15                  -1  1     37248  ultralytics.nn.modules.block.C2f             [192, 64, 1]
- 16                  -1  1     36992  ultralytics.nn.modules.conv.Conv             [64, 64, 3, 2]
- 17            [-1, 12]  1         0  ultralytics.nn.modules.conv.Concat           [1]
- 18                  -1  1    123648  ultralytics.nn.modules.block.C2f             [192, 128, 1]
- 19                  -1  1    147712  ultralytics.nn.modules.conv.Conv             [128, 128, 3, 2]
- 20             [-1, 9]  1         0  ultralytics.nn.modules.conv.Concat           [1]
- 21                  -1  1    493056  ultralytics.nn.modules.block.C2f             [384, 256, 1]
- 22        [15, 18, 21]  1    751507  ultralytics.nn.modules.head.Detect           [1, [64, 128, 256]]
-Model summary: 225 layers, 3,011,043 parameters, 3,011,027 gradients, 8.2 GFLOPs
-'''
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Hyperparameter tuning for YOLOv8")
+    
+    # Tuning method and limits
+    parser.add_argument('--method', type=str, choices=['grid', 'random'], default='random',
+                        help='Tuning method: grid search or random search')
+    parser.add_argument('--max_runs', type=int, default=10,
+                        help='Maximum number of tuning runs to perform')
+    
+    # Hyperparameter ranges (optional, can override defaults)
+    for param, values in HP_RANGES.items():
+        if isinstance(values[0], bool):
+            parser.add_argument(f'--{param}', nargs='+', type=lambda x: x.lower() == 'true', 
+                               default=values, help=f'Values for {param}')
+        elif isinstance(values[0], float):
+            parser.add_argument(f'--{param}', nargs='+', type=float, default=values, 
+                               help=f'Values for {param}')
+        elif isinstance(values[0], int):
+            parser.add_argument(f'--{param}', nargs='+', type=int, default=values, 
+                               help=f'Values for {param}')
+        else:
+            parser.add_argument(f'--{param}', nargs='+', type=str, default=values, 
+                               help=f'Values for {param}')
+    
+    args = parser.parse_args()
+    
+    # Get current directory
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(this_dir)
+    
+    # Create directories for results
+    output_dir = os.path.join(this_dir, "results")
+    logs_dir = os.path.join(output_dir, "logs")
+    weights_dir = os.path.join(output_dir, "weights")
+    create_directory_if_not_exists(logs_dir)
+    create_directory_if_not_exists(weights_dir)
+    
+    # Create parameter ranges dictionary from args
+    param_ranges = {}
+    for param in HP_RANGES.keys():
+        param_values = getattr(args, param, None)
+        if param_values is not None:
+            param_ranges[param] = param_values
+    
+    # Generate parameter combinations
+    if args.method == 'grid':
+        param_combinations = grid_search(param_ranges)
+    else:  # random search
+        param_combinations = grid_search(param_ranges, args.max_runs)
+    
+    # Limit the number of runs if needed
+    if len(param_combinations) > args.max_runs:
+        param_combinations = param_combinations[:args.max_runs]
+    
+    # Run hyperparameter tuning
+    all_results = []
+    
+    print(f"Starting hyperparameter tuning with {len(param_combinations)} runs...")
+    for i, params in enumerate(param_combinations):
+        print(f"\nRun {i+1}/{len(param_combinations)}")
+        print(f"Parameters: {params}")
+        
+        # Run training with these parameters
+        result = run_training(params, this_dir, i+1)
+        all_results.append(result)
+        
+        # Save intermediate results
+        intermediate_file = os.path.join(logs_dir, f"tuning_results_intermediate.json")
+        with open(intermediate_file, 'w') as f:
+            json.dump(all_results, f, indent=4)
+    
+    # Process and analyze results
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_results_file = os.path.join(logs_dir, f"tuning_results_{timestamp}.json")
+    with open(final_results_file, 'w') as f:
+        json.dump(all_results, f, indent=4)
+    print(f"All tuning results saved to: {final_results_file}")
+    
+    # Convert results to DataFrame for analysis
+    results_df = pd.DataFrame([{
+        'run_id': r['run_id'],
+        'mAP50': float(r['mAP50']) if isinstance(r['mAP50'], (int, float)) or (isinstance(r['mAP50'], str) and r['mAP50'].replace('.', '', 1).isdigit()) else 0.0,
+        **r['hyperparameters']
+    } for r in all_results])
+    
+    # Generate plots
+    if len(results_df) > 0:
+        plot_results(results_df, output_dir)
+        
+        # Save the best model
+        save_best_model(results_df, this_dir, output_dir)
+        
+        # Print results summary
+        print("\n--- Hyperparameter Tuning Results ---")
+        print(f"Total runs: {len(results_df)}")
+        if len(results_df) > 0:
+            best_idx = results_df['mAP50'].idxmax()
+            print(f"Best mAP50: {results_df.loc[best_idx, 'mAP50']:.4f} (Run {results_df.loc[best_idx, 'run_id']})")
+            print("Best hyperparameters:")
+            for param in HP_RANGES.keys():
+                if param in results_df.columns:
+                    print(f"  {param}: {results_df.loc[best_idx, param]}")
+    else:
+        print("No valid results found.")
