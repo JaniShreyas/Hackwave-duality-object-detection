@@ -13,3 +13,5 @@ data/
 *.png
 *.jpg
 *.pt
+
+runs/
