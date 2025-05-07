@@ -12,6 +12,6 @@ data/
 *.zip
 *.png
 *.jpg
-*.pt
+**/last.pt
 
 prediction_results/**/*.txt
