@@ -13,13 +13,35 @@ from pathlib import Path
 
 # Default hyperparameter ranges for tuning
 HP_RANGES = {
-    'epochs': [5, 10, 15],
+    # Original hyperparameters
+    'epochs': [10],
     'mosaic': [0.0, 0.1, 0.3, 0.5],
     'optimizer': ['AdamW', 'SGD', 'Adam'],
     'momentum': [0.2, 0.5, 0.9],
     'lr0': [0.001, 0.01, 0.0001],
     'lrf': [0.0001, 0.001, 0.00001],
-    'single_cls': [False]
+    'single_cls': [False],
+    
+    # Basic augmentation control
+    'augment': [True],  # Enable augmentations
+    
+    # Geometric transformations
+    'fliplr': [0.0, 0.5],  # Horizontal flip probability
+    'flipud': [0.0],  # Vertical flip probability (typically 0 for natural images)
+    'degrees': [0.0, 10.0, 20.0],  # Rotation (+/- deg)
+    'translate': [0.0, 0.1, 0.2],  # Translation (+/- fraction)
+    'scale': [0.0, 0.3, 0.5],  # Scale (+/- gain)
+    'shear': [0.0, 5.0],  # Shear (+/- deg)
+    'perspective': [0.0, 0.0001],  # Perspective distortion (+/- fraction)
+    
+    # Color transformations
+    'hsv_h': [0.0, 0.015, 0.03],  # HSV-Hue augmentation (fraction)
+    'hsv_s': [0.0, 0.4, 0.7],  # HSV-Saturation augmentation (fraction)
+    'hsv_v': [0.0, 0.2, 0.4],  # HSV-Value augmentation (fraction)
+    
+    # Advanced augmentations
+    'mixup': [0.0, 0.1],  # Mixup probability
+    'copy_paste': [0.0]  # Segment copy-paste probability
 }
 
 def create_directory_if_not_exists(directory):
@@ -40,6 +62,21 @@ def run_training(hyperparams, this_dir, run_id):
         device=0,
         single_cls=hyperparams['single_cls'],
         mosaic=hyperparams['mosaic'],
+        # Added augmentations
+        augment=hyperparams.get('augment', True),       # Random augmentations
+        fliplr=hyperparams.get('fliplr', 0.5),          # Horizontal flip probability
+        flipud=hyperparams.get('flipud', 0.0),          # Vertical flip probability
+        degrees=hyperparams.get('degrees', 0.0),        # Rotation (+/- deg)
+        translate=hyperparams.get('translate', 0.1),    # Translation (+/- fraction)
+        scale=hyperparams.get('scale', 0.5),            # Scale (+/- gain)
+        shear=hyperparams.get('shear', 0.0),            # Shear (+/- deg)
+        perspective=hyperparams.get('perspective', 0.0), # Perspective distortion (+/- fraction)
+        hsv_h=hyperparams.get('hsv_h', 0.015),          # HSV-Hue augmentation (fraction)
+        hsv_s=hyperparams.get('hsv_s', 0.7),            # HSV-Saturation augmentation (fraction)
+        hsv_v=hyperparams.get('hsv_v', 0.4),            # HSV-Value augmentation (fraction)
+        mixup=hyperparams.get('mixup', 0.0),            # Mixup probability
+        copy_paste=hyperparams.get('copy_paste', 0.0),  # Segment copy-paste probability
+        # Original parameters
         optimizer=hyperparams['optimizer'],
         lr0=hyperparams['lr0'],
         lrf=hyperparams['lrf'],
