@@ -1,0 +1,25 @@
+{
+    "model": "best.pt",
+    "timestamp": "20250507_120741",
+    "test_time_augmentation": {
+        "enabled": false,
+        "types": "Default YOLOv8 augmentations"
+    },
+    "metrics": {
+        "metrics/precision(B)": 0.9229,
+        "metrics/recall(B)": 0.779,
+        "metrics/mAP50(B)": 0.8768,
+        "metrics/mAP50-95(B)": 0.8039,
+        "fitness": 0.8112
+    },
+    "key_metrics": {
+        "mAP50": 0.8768,
+        "mAP50-95": 0.8039,
+        "precision": 0.9229,
+        "recall": 0.779
+    },
+    "directories": {
+        "results": "C:\\Users\\jania\\OneDrive\\Documents\\Shreyas\\Hackwave-duality-object-detection\\prediction_results\\predictions_20250507_120702",
+        "visualizations": "C:\\Users\\jania\\OneDrive\\Documents\\Shreyas\\Hackwave-duality-object-detection\\prediction_results\\predictions_20250507_120702\\visualizations"
+    }
+}

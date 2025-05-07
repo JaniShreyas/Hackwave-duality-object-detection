@@ -15,3 +15,4 @@ data/
 *.pt
 
 runs/
+prediction_results/**/*.txt

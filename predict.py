@@ -95,7 +95,7 @@ def validate_data_yaml(data_yaml):
         print(f"Error validating data YAML: {e}")
         return False
 
-def run_prediction(model, data_yaml, output_dir, conf_threshold=0.25, iou_threshold=0.7, device=0):
+def run_prediction(model, data_yaml, output_dir, conf_threshold=0.25, iou_threshold=0.7, device=0, use_tta=False, tta_types=None):
     """Run prediction on test data and save metrics."""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
@@ -112,7 +112,15 @@ def run_prediction(model, data_yaml, output_dir, conf_threshold=0.25, iou_thresh
         validated_yaml = data_yaml
     
     try:
-        # Run validation on test data
+        # Save information about TTA usage
+        tta_info = {
+            "use_tta": use_tta,
+            "tta_types": tta_types if tta_types else "Default"
+        }
+        with open(os.path.join(results_dir, "tta_config.json"), 'w') as f:
+            json.dump(tta_info, f, indent=4)
+        
+        # Run validation on test data with TTA if enabled
         results = model.val(
             data=validated_yaml,
             split="test",
@@ -123,7 +131,8 @@ def run_prediction(model, data_yaml, output_dir, conf_threshold=0.25, iou_thresh
             save_txt=True,
             save_conf=True,
             project=results_dir,
-            name="test_results"
+            name="test_results",
+            augment=use_tta  # This enables default TTA in YOLOv8
         )
     
         # Extract and save metrics
@@ -134,6 +143,11 @@ def run_prediction(model, data_yaml, output_dir, conf_threshold=0.25, iou_thresh
             for k, v in results.metrics.items():
                 metrics[k] = float(v) if isinstance(v, (int, float, np.number)) else v
         
+        # Add TTA information to metrics
+        metrics['test_time_augmentation'] = use_tta
+        if use_tta and tta_types:
+            metrics['tta_types'] = tta_types
+        
         # Save metrics to JSON
         metrics_file = os.path.join(results_dir, f"metrics_{timestamp}.json")
         with open(metrics_file, 'w') as f:
@@ -143,10 +157,10 @@ def run_prediction(model, data_yaml, output_dir, conf_threshold=0.25, iou_thresh
         return results, results_dir
     
     except Exception as e:
-        raise Exception(f"Something went wrong in training: {e}")
+        raise Exception(f"Something went wrong in prediction: {e}")
 
-def visualize_predictions(model, data_yaml, results_dir, num_images=10, conf_threshold=0.25):
-    """Generate visualization of predictions on sample test images."""
+def visualize_predictions(model, data_yaml, results_dir, num_images=10, conf_threshold=0.25, use_tta=False, tta_types=None):
+    """Generate visualization of predictions on sample test images with optional TTA."""
     # Load the data configuration
     try:
         import yaml
@@ -219,12 +233,16 @@ def visualize_predictions(model, data_yaml, results_dir, num_images=10, conf_thr
     vis_dir = os.path.join(results_dir, "visualizations")
     create_directory_if_not_exists(vis_dir)
     
+    # Create subdirectories to compare with/without TTA
+    if use_tta:
+        no_tta_dir = os.path.join(vis_dir, "no_tta")
+        tta_dir = os.path.join(vis_dir, "with_tta")
+        create_directory_if_not_exists(no_tta_dir)
+        create_directory_if_not_exists(tta_dir)
+    
     # Run predictions on test images and create visualizations
     for img_path in test_images:
         try:
-            # Make prediction
-            results = model.predict(img_path, conf=conf_threshold, save=True, project=vis_dir)
-            
             # If this is a path from a file list, get the actual path
             if not os.path.exists(img_path) and os.path.exists(img_path.lstrip()):
                 img_path = img_path.lstrip()
@@ -233,15 +251,103 @@ def visualize_predictions(model, data_yaml, results_dir, num_images=10, conf_thr
             img_name = os.path.basename(img_path)
             base_name = os.path.splitext(img_name)[0]
             
-            # The prediction results are automatically saved by YOLO in the vis_dir
+            if use_tta:
+                # First predict without TTA
+                results_no_tta = model.predict(img_path, conf=conf_threshold, save=True, project=no_tta_dir)
+                
+                # Then predict with TTA
+                results_tta = model.predict(img_path, conf=conf_threshold, save=True, project=tta_dir, augment=True)
+                
+                # Create side-by-side comparison
+                create_comparison_visualization(img_path, results_no_tta, results_tta, 
+                                               os.path.join(vis_dir, f"{base_name}_comparison.jpg"), 
+                                               class_names)
+            else:
+                # Just predict normally
+                results = model.predict(img_path, conf=conf_threshold, save=True, project=vis_dir)
             
         except Exception as e:
             print(f"Error processing {img_path}: {e}")
     
     print(f"Visualizations saved to: {vis_dir}")
 
-def generate_report(results, model_path, results_dir):
-    """Generate a summary report of prediction results."""
+def create_comparison_visualization(img_path, results_no_tta, results_tta, output_path, class_names):
+    """Create a side-by-side comparison of predictions with and without TTA."""
+    try:
+        # Load the original image
+        original_img = cv2.imread(img_path)
+        if original_img is None:
+            print(f"Warning: Could not load image {img_path}")
+            return
+            
+        original_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+        
+        # Get the first result from each prediction (assuming single image input)
+        result_no_tta = results_no_tta[0] if results_no_tta else None
+        result_tta = results_tta[0] if results_tta else None
+        
+        # Create a figure for comparison
+        plt.figure(figsize=(18, 9))
+        
+        # Plot image without TTA
+        plt.subplot(1, 2, 1)
+        plt.imshow(original_img)
+        plt.title("Without Test Time Augmentation")
+        
+        # Draw bounding boxes for no TTA
+        if result_no_tta and hasattr(result_no_tta, 'boxes'):
+            boxes = result_no_tta.boxes
+            for box in boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                conf = box.conf[0].item()
+                cls = int(box.cls[0].item())
+                
+                # Get class name
+                cls_name = class_names.get(cls, f"Class {cls}")
+                
+                # Create rectangle patch
+                rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, 
+                                        edgecolor='r', facecolor='none')
+                plt.gca().add_patch(rect)
+                
+                # Add label
+                plt.text(x1, y1-5, f"{cls_name}: {conf:.2f}", color='white', 
+                         backgroundcolor='red', fontsize=8)
+        
+        # Plot image with TTA
+        plt.subplot(1, 2, 2)
+        plt.imshow(original_img)
+        plt.title("With Test Time Augmentation")
+        
+        # Draw bounding boxes for TTA
+        if result_tta and hasattr(result_tta, 'boxes'):
+            boxes = result_tta.boxes
+            for box in boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                conf = box.conf[0].item()
+                cls = int(box.cls[0].item())
+                
+                # Get class name
+                cls_name = class_names.get(cls, f"Class {cls}")
+                
+                # Create rectangle patch
+                rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, 
+                                        edgecolor='g', facecolor='none')
+                plt.gca().add_patch(rect)
+                
+                # Add label
+                plt.text(x1, y1-5, f"{cls_name}: {conf:.2f}", color='white', 
+                         backgroundcolor='green', fontsize=8)
+        
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+        
+    except Exception as e:
+        print(f"Error creating comparison visualization: {e}")
+
+def generate_report(results, model_path, results_dir, use_tta=False, tta_types=None):
+    """Generate a summary report of prediction results with TTA information."""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Extract metrics for reporting
@@ -270,7 +376,27 @@ def generate_report(results, model_path, results_dir):
     with open(report_file, 'w') as f:
         f.write(f"# YOLOv8 Prediction Report\n\n")
         f.write(f"**Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        f.write(f"**Model:** {os.path.basename(model_path)}\n\n")
+
+        # Normalize and split the path
+        parts = os.path.normpath(model_path).split(os.sep)
+
+        # Find the index of "results" in the path
+        try:
+            idx = parts.index("results")
+            relative_path = os.path.join(*parts[idx:])
+            print(relative_path)
+        except ValueError:
+            print("'results' not found in path")
+        f.write(f"**Model:**  {relative_path}\n\n")
+        
+        # Add TTA information
+        f.write("## Test Time Augmentation\n\n")
+        f.write(f"* **TTA Enabled:** {use_tta}\n")
+        if use_tta and tta_types:
+            f.write(f"* **TTA Types:** {', '.join(tta_types)}\n")
+        elif use_tta:
+            f.write(f"* **TTA Types:** Default YOLOv8 augmentations (flips, scales)\n")
+        f.write("\n")
         
         f.write("## Key Metrics\n\n")
         f.write(f"* **mAP50:** {map50}\n")
@@ -293,6 +419,11 @@ def generate_report(results, model_path, results_dir):
         json.dump({
             "model": os.path.basename(model_path),
             "timestamp": timestamp,
+            "test_time_augmentation": {
+                "enabled": use_tta,
+                "types": tta_types if tta_types else "Default YOLOv8 augmentations"
+            },
+            
             "metrics": metrics_formatted,
             "key_metrics": {
                 "mAP50": map50,
@@ -359,6 +490,14 @@ def find_model_by_run_name(results_dir, run_name):
     print(f"Warning: Could not find model for run {run_name}. Looking for latest model...")
     return find_latest_model(results_dir)
 
+def get_tta_types_from_string(tta_types_str):
+    """Parse the TTA types string into a list of augmentation types."""
+    if not tta_types_str:
+        return None
+        
+    # Split the string by commas
+    return [t.strip().lower() for t in tta_types_str.split(',')]
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run predictions with a trained YOLOv8 model")
     
@@ -381,6 +520,14 @@ if __name__ == '__main__':
                         help='Number of test images to visualize')
     parser.add_argument('--test_data', type=str, default=None,
                         help='Path to test data directory, overrides data YAML test path')
+    
+    # TTA-specific arguments
+    parser.add_argument('--tta', action='store_true',
+                        help='Enable Test Time Augmentation for predictions')
+    parser.add_argument('--tta_types', type=str, default=None,
+                        help='Comma-separated list of TTA types to use (e.g., "flip,scale,rotate")')
+    parser.add_argument('--compare_tta', action='store_true',
+                        help='Generate side-by-side visualizations of predictions with and without TTA')
     
     args = parser.parse_args()
     
@@ -448,6 +595,17 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Error modifying data YAML: {e}")
     
+    # Process TTA types
+    tta_types = get_tta_types_from_string(args.tta_types) if args.tta else None
+    
+    # Print TTA configuration
+    if args.tta:
+        print(f"Test Time Augmentation enabled")
+        if tta_types:
+            print(f"TTA types: {', '.join(tta_types)}")
+        else:
+            print("Using default YOLOv8 TTA (flips and scales)")
+    
     # Load the model
     model = load_model(model_path)
     
@@ -458,7 +616,9 @@ if __name__ == '__main__':
         output_dir=output_dir,
         conf_threshold=args.conf,
         iou_threshold=args.iou,
-        device=args.device
+        device=args.device,
+        use_tta=args.tta,
+        tta_types=tta_types
     )
     
     # Generate visualizations
@@ -467,13 +627,15 @@ if __name__ == '__main__':
         data_yaml=data_path,
         results_dir=results_dir,
         num_images=args.num_vis,
-        conf_threshold=args.conf
+        conf_threshold=args.conf,
+        use_tta=args.compare_tta,  # Only create comparison visuals if requested
+        tta_types=tta_types
     )
     
     # Generate confusion matrix plot
     plot_confusion_matrix(results_dir)
     
     # Generate report
-    generate_report(results, model_path, results_dir)
+    generate_report(results, model_path, results_dir, args.tta, tta_types)
     
     print(f"\nPrediction complete! Results saved to: {results_dir}")
