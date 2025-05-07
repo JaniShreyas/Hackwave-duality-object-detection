@@ -14,7 +14,7 @@ from pathlib import Path
 # Default hyperparameter ranges for tuning
 HP_RANGES = {
     # Original hyperparameters
-    'epochs': [10],
+    'epochs': [15],
     'mosaic': [0.0, 0.1, 0.3, 0.5],
     'optimizer': ['AdamW', 'SGD', 'Adam'],
     'momentum': [0.2, 0.5, 0.9],
