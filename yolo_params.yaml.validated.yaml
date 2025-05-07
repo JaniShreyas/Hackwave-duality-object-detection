@@ -1,0 +1,8 @@
+names:
+- FireExtinguisher
+- ToolBox
+- OxygenTank
+nc: 3
+test: data/test
+train: data/train/images
+val: data/val/images

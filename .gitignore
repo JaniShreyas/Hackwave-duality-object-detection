@@ -13,3 +13,5 @@ data/
 *.png
 *.jpg
 *.pt
+
+prediction_results/**/*.txt
