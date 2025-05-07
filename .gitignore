@@ -14,4 +14,5 @@ data/
 *.jpg
 **/last.pt
 
+runs/
 prediction_results/**/*.txt
