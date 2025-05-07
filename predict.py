@@ -478,7 +478,18 @@ def generate_report(results, model_path, results_dir, use_tta=False, tta_types=N
     with open(report_file, 'w') as f:
         f.write(f"# YOLOv8 Prediction Report\n\n")
         f.write(f"**Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        f.write(f"**Model:** {os.path.basename(model_path)}\n\n")
+
+        # Normalize and split the path
+        parts = os.path.normpath(model_path).split(os.sep)
+
+        # Find the index of "results" in the path
+        try:
+            idx = parts.index("results")
+            relative_path = os.path.join(*parts[idx:])
+            print(relative_path)
+        except ValueError:
+            print("'results' not found in path")
+        f.write(f"**Model:**  {relative_path}\n\n")
         
         # Add TTA information
         f.write("## Test Time Augmentation\n\n")
@@ -514,6 +525,7 @@ def generate_report(results, model_path, results_dir, use_tta=False, tta_types=N
                 "enabled": use_tta,
                 "types": tta_types if tta_types else "Default YOLOv8 augmentations"
             },
+            
             "metrics": metrics_formatted,
             "key_metrics": {
                 "mAP50": map50,
