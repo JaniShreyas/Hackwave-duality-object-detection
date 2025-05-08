@@ -1,5 +1,5 @@
 import torch
-import numpy 
+import numpy as np 
 from ultralytics.utils.ops import non_max_suppression
 
 def soft_nms(
