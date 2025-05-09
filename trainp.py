@@ -15,9 +15,23 @@ import torch
 import sys
 
 
+# Custom JSON encoder to handle numpy types
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        return super(NumpyEncoder, self).default(obj)
+
+
 HP_RANGES = {
     # Core training parameters
-    'epochs': [30, 50],  
+    'epochs': [15],  
     'patience': [10], 
     'batch': [16, 32], 
     
@@ -52,7 +66,7 @@ HP_RANGES = {
     'cache': [True],  
     'rect': [False],  # Rectangular training
     'cos_lr': [True],  
-    'close_mosaic': [10],  # Last epoch to use mosaic
+    'close_mosaic': [10],  
     'overlap_mask': [True],  # Mask overlapping objects
     'mask_ratio': [4],  # Mask downsampling ratio
     'dropout': [0.0, 0.1], 
@@ -65,6 +79,29 @@ def create_directory_if_not_exists(directory):
         os.makedirs(directory)
         print(f"Created directory: {directory}")
 
+def check_data_directories(data_yaml_path):
+    """Check if data directories exist."""
+    try:
+        import yaml
+        with open(data_yaml_path, 'r') as file:
+            data_config = yaml.safe_load(file)
+        
+        # Get directory paths
+        train_dir = os.path.join(os.path.dirname(data_yaml_path), data_config.get('train', ''))
+        val_dir = os.path.join(os.path.dirname(data_yaml_path), data_config.get('val', ''))
+        test_dir = os.path.join(os.path.dirname(data_yaml_path), data_config.get('test', ''))
+        
+        # Verify directories exist
+        for dir_path in [train_dir, val_dir, test_dir]:
+            if dir_path and not os.path.exists(dir_path):
+                print(f"Warning: Directory {dir_path} does not exist!")
+                return False
+                
+        return True
+    except Exception as e:
+        print(f"Error checking data directories: {e}")
+        return False
+
 def run_training(hyperparams, this_dir, run_id):
     """Run a single training with given hyperparameters."""
     # Get current timestamp
@@ -76,15 +113,25 @@ def run_training(hyperparams, this_dir, run_id):
     # Create model instance
     model = YOLO(model_path)
     
+    # Check if CUDA is available
+    device = 0 if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
+    
+    # Get data YAML path
+    data_yaml_path = os.path.join(this_dir, "yolo_params.yaml")
+    
+    # Check data directories
+    check_data_directories(data_yaml_path)
+    
     # Set up training parameters
     train_params = {
         # Core training parameters
-        'data': os.path.join(this_dir, "yolo_params.yaml"),
+        'data': data_yaml_path,
         'epochs': hyperparams['epochs'],
-        'patience': hyperparams.get('patience', 10),
+        'patience': hyperparams.get('patience', 5),
         'batch': hyperparams.get('batch', 16),
         'imgsz': hyperparams.get('imgsz', 640),
-        'device': 0,
+        'device': device,  # Use CPU if CUDA is not available
         
         # Optimization parameters
         'optimizer': hyperparams['optimizer'],
@@ -267,7 +314,7 @@ def smart_search(param_ranges, max_runs=20):
     base_configs = [
         # Config 1: High augmentation focus
         {
-            'epochs': 50,
+            'epochs': 15,  
             'mosaic': 0.9,
             'mixup': 0.3,
             'hsv_h': 0.03,
@@ -286,11 +333,12 @@ def smart_search(param_ranges, max_runs=20):
             'batch': 32,
             'imgsz': 640,
             'cos_lr': True,
-            'close_mosaic': 10,
+            'close_mosaic': 10,  
+            'patience': 10,  
         },
         # Config 2: Optimization focus
         {
-            'epochs': 50,
+            'epochs': 15,  
             'mosaic': 0.7,
             'mixup': 0.1,
             'hsv_h': 0.015,
@@ -307,13 +355,14 @@ def smart_search(param_ranges, max_runs=20):
             'momentum': 0.95,
             'weight_decay': 0.01,
             'batch': 16,
-            'imgsz': 1280,
+            'imgsz': 640,
             'cos_lr': True,
-            'close_mosaic': 10,
+            'close_mosaic': 10,  
+            'patience': 10,  # Increased patience
         },
         # Config 3: Balanced approach
         {
-            'epochs': 30,
+            'epochs': 15,  
             'mosaic': 0.5,
             'mixup': 0.1,
             'copy_paste': 0.1,
@@ -333,7 +382,8 @@ def smart_search(param_ranges, max_runs=20):
             'batch': 32,
             'imgsz': 640,
             'cos_lr': True,
-            'close_mosaic': 10,
+            'close_mosaic': 10,  
+            'patience': 10,  # Increased patience
         },
     ]
     
@@ -483,14 +533,18 @@ def save_best_model(results_df, this_dir, output_dir):
         best_hp_file = os.path.join(output_dir, "logs", f"{base_filename}_best_hyperparams.json")
         with open(best_hp_file, 'w') as f:
             json.dump({
-                "best_run_id": best_run_id,
+                "best_run_id": int(best_run_id),
                 "mAP50": float(best_map50),
                 "hyperparameters": {
-                    key: (value if key != 'single_cls' else bool(value))
+                    key: (
+                        bool(value) if key == 'single_cls' 
+                        else float(value) if isinstance(value, (np.integer, np.floating)) 
+                        else value
+                    )
                     for key, value in best_run.items() 
                     if key in HP_RANGES.keys()
                 }
-            }, f, indent=4)
+            }, f, indent=4, cls=NumpyEncoder)
         print(f"Best hyperparameters saved to: {best_hp_file}")
         
         # Return path to best model
@@ -575,7 +629,7 @@ if __name__ == '__main__':
     # Tuning method and limits
     parser.add_argument('--method', type=str, choices=['grid', 'random', 'smart'], default='smart',
                         help='Tuning method: grid search, random search, or smart search')
-    parser.add_argument('--max_runs', type=int, default=10,
+    parser.add_argument('--max_runs', type=int, default=3,  
                         help='Maximum number of tuning runs to perform')
     parser.add_argument('--ensemble', action='store_true', default=True,
                         help='Create an ensemble of best models')
@@ -591,7 +645,7 @@ if __name__ == '__main__':
                         help='Path to previous results JSON file to continue from')
     
     # Add option to enable CUDA benchmarking
-    parser.add_argument('--cuda_benchmark', action='store_true', default=True,
+    parser.add_argument('--cuda_benchmark', action='store_true', default=False,  
                         help='Enable CUDA benchmarking for faster training')
     
     # Add option to use test time augmentation
@@ -623,6 +677,10 @@ if __name__ == '__main__':
     # Get current directory
     this_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(this_dir)
+    
+    # Check for CUDA availability
+    cuda_available = torch.cuda.is_available()
+    print(f"CUDA is {'available' if cuda_available else 'not available'}, using {'GPU' if cuda_available else 'CPU'} for training")
     
     # Create directories for results
     output_dir = os.path.join(this_dir, "results")
@@ -673,13 +731,13 @@ if __name__ == '__main__':
         # Save intermediate results
         intermediate_file = os.path.join(logs_dir, f"tuning_results_intermediate.json")
         with open(intermediate_file, 'w') as f:
-            json.dump(all_results, f, indent=4)
+            json.dump(all_results, f, indent=4, cls=NumpyEncoder)
     
     # Process and analyze results
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     final_results_file = os.path.join(logs_dir, f"tuning_results_{timestamp}.json")
     with open(final_results_file, 'w') as f:
-        json.dump(all_results, f, indent=4)
+        json.dump(all_results, f, indent=4, cls=NumpyEncoder)
     print(f"All tuning results saved to: {final_results_file}")
     
     # Convert results to DataFrame for analysis
